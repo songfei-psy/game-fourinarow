@@ -5,7 +5,7 @@ import json
 import time
 from datetime import datetime
 from env.chess import four_in_a_row
-from env.agent import RandomAgent, MinimaxAgent
+from env.agent import *
 
 # ===== 配置参数 =====
 CELL_SIZE = 100
@@ -67,17 +67,20 @@ def save_data(result):
     print(f"Game saved to {filename}")
 
 
-def draw_board(game, winner_text=None):
+def draw_board(game, winner_text=None, ai_thinking=False):
     screen.fill(BG_COLOR)
 
     # 玩家提示
     if not winner_text:
-        if game.curr_player == 0:
-            text = "Player 1's Turn"
-        elif game.curr_player == 1 and selected_mode == "PVP":
-            text = "Player 2's Turn"
-        elif game.curr_player == 1 and selected_mode == "PVE":
-            text = "Player's Turn"
+        if selected_mode == "PVP":
+            text = "Player 1's Turn" if game.curr_player == 0 else "Player 2's Turn"
+        elif selected_mode == "PVE":
+            if game.curr_player == 0:
+                text = "Player's Turn"
+            elif ai_thinking:
+                text = "AI is thinking..."
+            else:
+                text = ""
         else:
             text = ""
         player_text = font.render(text, True, BLACK)
@@ -149,8 +152,12 @@ def reset_game(mode, agent_type="random"):
     player2_moves = []
     start_time = time.perf_counter()
     game = four_in_a_row()
-    if agent_type == "minimax":
-        agent = MinimaxAgent(game, player_id=1, max_depth=3)
+    if agent_type == "heuristic":
+        params = default_params().to_list()
+        agent = HeuristicAgent(game, params=params)
+    elif agent_type == "bfs":
+        params = default_params().to_list()
+        agent = BFSAgent(game, params=params)
     elif agent_type == "random":
         agent = RandomAgent(game, player_id=1)
     else:  # error
@@ -163,25 +170,30 @@ def reset_game(mode, agent_type="random"):
 def main():
     global selected_mode
     clock = pygame.time.Clock()
-    game, agent, state, game_over, winner_text = reset_game(selected_mode, agent_type="random")
+    game, agent, state, game_over, winner_text = reset_game(selected_mode, agent_type="bfs")
 
     while True:
         clock.tick(30)
 
-        # 自动 AI 落子
+        # 主循环中 AI 自动落子部分
         if not game_over and selected_mode == "PVE" and game.curr_player == 1:
             valid_actions = game.get_valid_actions(game.board)
             if valid_actions:
-                pygame.time.wait(300)
+                draw_board(game, winner_text if game_over else None, ai_thinking=True)
+                draw_buttons()
+                pygame.display.flip()
+
+                pygame.time.wait(300)  # 可调节延迟
                 action = agent.select_action(game.board)
                 log_move("player2", list(action))
                 state, reward, done, info = game.step(action)
+
                 if done:
                     game_over = True
                     winner = info.get("winner", "draw").lower()
+                    result = "player1" if winner == "black" else "player2" if winner == "white" else "draw"
                     winner_text = "Player 1 wins!" if winner == "black" else "Player 2 wins!" if winner == "white" else "It's a draw!"
-                    save_data("player1" if winner == "black" else "player2" if winner == "white" else "draw")
-                    continue
+                    save_data(result)
 
         draw_board(game, winner_text if game_over else None)
         pvp_btn, pve_btn, restart_btn, exit_btn = draw_buttons()
