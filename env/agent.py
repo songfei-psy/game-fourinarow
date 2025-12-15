@@ -3,7 +3,6 @@ import os
 import pickle
 import numpy as np
 from copy import deepcopy
-from pyibs import IBS
 from env.chess import *
 
 
@@ -44,15 +43,16 @@ class Node:
         """
         Node for a tree search
         The basic element in the tree search.
-        Note that this node combien state and action
-        together, due to that the four in a row enviorment
+        Note that this node combines state and action together, due to that the four-in-a-row environment
         is deterministic.
 
         Inputs:
-            state: tuple (board, player_id):
-            action: tuple (row, col)
+            state: tuple (board, player_id)
+            action: tuple (row, col), cordinates in the board
             parent: node
-            depth: int
+            depth: int, the search depth
+            value: float
+            heuristic_fn: function, heuristic evaluation function
         """
         # basic info
         self.state = state
@@ -70,17 +70,16 @@ class default_params:
     Obtained from:
         https://github.com/basvanopheusden/ibs-development/blob/master/matlab/generate_resp_fourinarow.m
     '''
-    lmbda = 0.02
-    gamma = 0.02
-    theta = 2
-    delta = 0.005
-    C = 0.92498
-    w_ce = 0.60913
-    w_c2 = 0.90444
-    w_u2 = 0.45076
-    w_c3 = 3.42720
-    w_c4 = 20.17280
-
+    lmbda = 0.02  # lapse probability, simulated annealing
+    gamma = 0.02  # stopping probability
+    theta = 2  # pruning threshold
+    delta = 0.005  # feature drop rate
+    C = 0.92498  # play vs opponent coefficient
+    w_ce = 0.60913  # center weight
+    w_c2 = 0.90444  # connected 2 weight
+    w_u2 = 0.45076  # unconnected 2 weight
+    w_c3 = 3.42720  # connected 3 weight
+    w_c4 = 20.17280  # connected 4 weight
     def to_list(self):
         return [self.lmbda, self.gamma, self.theta, self.delta, self.C,
                 self.w_ce, self.w_c2, self.w_u2, self.w_c3, self.w_c4]
@@ -118,9 +117,9 @@ class HeuristicAgent(basic_agent):
     p_names = ['lmbda', 'gamma', 'theta', 'delta', 'C',
                'w_ce', 'w_c2', 'w_u2', 'w_c3', 'w_c4']
     p_bnds = [(0, 1), (.001, 1), (.1, 10), (0, 1), (.05, 4),
-              (-10, 10), (-10, 10), (-10, 10), (-10, 10), (-10, 10)]
+              (-10, 10), (-10, 10), (-10, 10), (-10, 10), (-10, 10)]  # bounds, used in parameter inference
     p_pbnds = [(.05, .5), (.1, .9), (.2, 8), (.001, .5), (.5, 2),
-               (-5, 5), (-5, 5), (-5, 5), (-5, 5), (-5, 5)]
+               (-5, 5), (-5, 5), (-5, 5), (-5, 5), (-5, 5)]  # prior bounds, used in parameter inference
     n_params = len(p_names)
 
     def __init__(self, env, params):
@@ -140,6 +139,9 @@ class HeuristicAgent(basic_agent):
         self.w_c4 = params[9]  # connected 4
 
     def define_features(self):
+        '''
+        which features to include in the heuristic evaluation
+        '''
         self.features = [
             'connected_2_feature',
             'unconnected_2_feature',
@@ -151,29 +153,33 @@ class HeuristicAgent(basic_agent):
         '''greedy policy based on heuristic evaluation
 
         Inputs:
-            state: a tuple (board, player_id)
+            state (tuple): (board, player_id) the current state
+                * board: np.ndarray, the board of the game
+                * player_id: int, black-player-0, white-player-1
 
         Outputs:
             action: a tuple (row, col)
         '''
-        self.player_id = state[1]
+        self.player_id = state[1]  # obtain the current player id, in AI agent setting, it is always 1
         self.opponent_id = 1 - self.player_id
         # build the root node
         root = Node(state=state,
-                    parent=None,
+                    parent=None,  # root has no parent
                     heuristic_fn=self.heuristic,
                     depth=0)
         # expand all root
         self.expand_node(root)
+        
         # choose the best action based on the minimax algorithm
-        return self.minmax(root).action
+        action = self.minmax(root).action
+        return (int(action[0]), int(action[1]))
 
     def expand_node(self, node):
         state = node.state
         valid_actions = self.env.get_valid_actions(state[0])
         if len(valid_actions) > 0:
             # expand the node throught breadth first search
-            for action in valid_actions:
+            for action in valid_actions:  # expand all valid actions, means all possible nodes without pruning
                 # this deepcopy is important
                 # as the transit function will modify the state
                 # we need to keep the original state for the parent node
@@ -182,14 +188,14 @@ class HeuristicAgent(basic_agent):
                 child_node = Node(
                     state=state_next,
                     action=action,
-                    parent=node,
+                    parent=node,  # set the parent node, the input node
                     heuristic_fn=self.heuristic,
-                    depth=node.depth + 1
+                    depth=node.depth + 1  # increment depth in each loop
                 )
-                node.children.append(child_node)
+                node.children.append(child_node)  # add child node to the parent node
             # get the max value of the children
             max_value = self.minmax(node).value
-            # prune the low value children
+            # prune the low value children based on threshold theta
             node.children = [child for child in node.children if np.abs(child.value - max_value) <= self.theta]
 
     def minmax(self, node: Node):
@@ -254,6 +260,8 @@ class HeuristicAgent(basic_agent):
 
         Inputs:
             state: tuple (board, player_id)
+            (board: numpy array, 0 for black pieces, 1 for white pieces, 0.75 for empty spaces)
+            verbose: bool, whether to print debug information
 
         Outputs:
             value: float
@@ -392,10 +400,10 @@ class HeuristicAgent(basic_agent):
                     continue
 
                 # Get coordinates for checking patterns
-                prev_r, prev_c = r - dr, c - dc
-                next2_r, next2_c = next_r + dr, next_c + dc
-                next3_r, next3_c = next2_r + dr, next2_c + dc
-                prev2_r, prev2_c = prev_r - dr, prev_c - dc
+                prev_r, prev_c = r - dr, c - dc  # previous cell
+                next2_r, next2_c = next_r + dr, next_c + dc  # cell after next
+                next3_r, next3_c = next2_r + dr, next2_c + dc  # two cells after next
+                prev2_r, prev2_c = prev_r - dr, prev_c - dc  # two cells before previous
 
                 # Check if coordinates are within bounds
                 next2_valid = 0 <= next2_r < rows and 0 <= next2_c < cols
@@ -723,7 +731,7 @@ class BFSAgent(HeuristicAgent):
         # assign player id
         self.player_id = state[1]
         self.opponent_id = 1 - self.player_id
-        # drop a feature
+        # drop features with probability delta
         self.drop_feature(self.delta)
         # construct the root node
         root = Node(
@@ -734,10 +742,10 @@ class BFSAgent(HeuristicAgent):
             depth=0
         )
         # randomly pick an action if lapse
-        if self.lapse(self.lmbda):
+        if np.random.rand() < self.lmbda:
             # get the valid actions
             valid_actions = self.env.get_valid_actions(state[0])
-            idx = np.random.choice(len(valid_actions))
+            idx = np.random.choice(len(valid_actions))  # random index
             child_node = Node(
                 state=deepcopy(state),
                 action=valid_actions[idx],
@@ -780,10 +788,6 @@ class BFSAgent(HeuristicAgent):
         return self.n_iter
 
         # ------------ aux functions ------------- #
-
-    def lapse(self, lmbda):
-        return np.random.rand() < lmbda
-
     def drop_feature(self, delta):
         '''Drop a feature from the heuristic evaluation
 
@@ -816,67 +820,19 @@ class BFSAgent(HeuristicAgent):
         return False
 
     def select_node(self, root):
+        """
+        select a node to expand using BFS
+
+        Args:
+            root: Node, the root node of the tree
+
+        Returns:
+            Node: the selected node to expand according to minmax
+        """
         node = root
-        while len(node.children) > 0:
+        while len(node.children) > 0:  # while the node is not a leaf node
             node = self.minmax(node)
         return node
-
-    def minmax(self, node: Node):
-        '''Minimax algorithm
-
-        Choose the best action for the current player
-        based on the minimax algorithm. If the player's
-        turn, the function returns the child with the
-        highest value. If the opponent's turn, the function
-        returns the child with the lowest value.
-
-        Inputs:
-            node: a Node object
-
-        Outputs:
-            best_node: a Node object
-        '''
-        # if the node is a leaf node, return the node
-        if len(node.children) == 0: return node
-        # if it is the player's turn, choose the child with the highest value
-        if self.player_id == node.state[1]:
-            best_node, best_value = None, -np.inf
-            for child in node.children:
-                if child.value > best_value:
-                    best_node, best_value = child, child.value
-            return best_node
-        # if it is the opponent's turn, choose the child with the lowest value
-        else:
-            best_node, best_value = None, np.inf
-            for child in node.children:
-                if child.value < best_value:
-                    best_node, best_value = child, child.value
-            return best_node
-
-    def expand_node(self, node: Node):
-        '''Expand the node through breadth first search'''
-        state = node.state
-        valid_actions = self.env.get_valid_actions(state[0])
-        if len(valid_actions) > 0:
-            # expand the node throught breadth first search
-            for action in valid_actions:
-                # this deepcopy is important
-                # as the transit function will modify the state
-                # we need to keep the original state for the parent node
-                # otherwise, the state will be modified
-                state_next, _, done, info = self.env.transit(deepcopy(state), action)
-                child_node = Node(
-                    state=state_next,
-                    action=action,
-                    parent=node,
-                    heuristic_fn=self.heuristic,
-                    depth=node.depth + 1
-                )
-                node.children.append(child_node)
-            # get the max value of the children
-            max_value = self.minmax(node).value
-            # prune the low value children
-            node.children = [child for child in node.children if np.abs(child.value - max_value) <= self.theta]
 
     def backpropagate(self, node):
         '''Backpropagate the value of the node
@@ -893,4 +849,264 @@ class BFSAgent(HeuristicAgent):
             self.backpropagate(node.parent)
 
 
+# ------------ Improved Heuristic Agent with Open-End Feature ------------ #
+class OpenEndHeuristicAgent(HeuristicAgent):
+    '''Improved Heuristic Agent with Open-End Features
+    
+    This agent refines the feature extraction by considering the number of open ends
+    for each pattern. A pattern is weighted based on how many sides are unblocked:
+    - Fully open (both ends empty): weight = 1.0
+    - Semi-open (one end blocked): weight = 0.5
+    - Closed (both ends blocked): weight = 0.0 (not counted)
+    '''
+    name = 'open_end_heuristic_agent'
 
+    @staticmethod
+    def get_connected_2_feature(board, player_pieces, not_occupied=.75, verbose=False):
+        '''Calculate connected 2-in-a-row features with open-end weighting
+        
+        Patterns:
+        - -xx- : fully open 2 (weight=1.0)
+        - oxx- or -xxo : semi-open 2 (weight=0.5)
+        - oxxo : closed 2 (weight=0.0, not counted)
+        
+        Check in four directions: horizontal, vertical, diagonal1, diagonal2.
+        '''
+        if player_pieces is None or len(player_pieces) < 2:
+            return 0
+
+        rows, cols = board.shape
+        count = 0.0
+
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        direction_names = {(0, 1): 'horizontal',
+                           (1, 0): 'vertical',
+                           (1, 1): 'diagonal1',
+                           (1, -1): 'diagonal2'}
+
+        piece_set = set(map(tuple, player_pieces))
+        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
+        opponent_color = 1 - player_color
+
+        counted_features = set()
+
+        for r, c in player_pieces:
+            for dr, dc in directions:
+                next_r, next_c = r + dr, c + dc
+                if (next_r, next_c) not in piece_set:
+                    continue
+
+                prev_r, prev_c = r - dr, c - dc
+                next2_r, next2_c = next_r + dr, next_c + dc
+
+                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
+                next2_valid = 0 <= next2_r < rows and 0 <= next2_c < cols
+
+                if not (prev_valid and next2_valid):
+                    continue
+
+                prev_piece = board[prev_r, prev_c]
+                next2_piece = board[next2_r, next2_c]
+
+                # Calculate number of open ends (0, 1, or 2)
+                open_ends = 0
+                if prev_piece == not_occupied:
+                    open_ends += 1
+                if next2_piece == not_occupied:
+                    open_ends += 1
+
+                # Only count if at least one end is open
+                if open_ends > 0:
+                    feature_key = (r, c, dr, dc)
+                    if feature_key not in counted_features:
+                        counted_features.add(feature_key)
+                        weight = open_ends / 2.0  # Normalize: 1 open end = 0.5, 2 open ends = 1.0
+                        if verbose:
+                            pattern = f"xx with {open_ends} open end(s)"
+                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
+                        count += weight
+
+        return count
+
+    @staticmethod
+    def get_unconnected_2_feature(board, player_pieces, not_occupied=.75, verbose=False):
+        '''Calculate unconnected 2-in-a-row features with open-end weighting
+        
+        Patterns:
+        - -x-x- : fully open (weight=1.0)
+        - ox-x- or -x-xo : semi-open (weight=0.5)
+        - ox-xo : closed (weight=0.0, not counted)
+        '''
+        if player_pieces is None or len(player_pieces) < 2:
+            return 0
+
+        rows, cols = board.shape
+        count = 0.0
+
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        direction_names = {(0, 1): 'horizontal',
+                           (1, 0): 'vertical',
+                           (1, 1): 'diagonal1',
+                           (1, -1): 'diagonal2'}
+
+        piece_set = set(map(tuple, player_pieces))
+
+        counted_features = set()
+
+        for r, c in player_pieces:
+            for dr, dc in directions:
+                next_r, next_c = r + dr, c + dc
+                next2_r, next2_c = next_r + dr, next_c + dc
+                prev_r, prev_c = r - dr, c - dc
+                prev2_r, prev2_c = prev_r - dr, prev_c - dc
+
+                next_valid = 0 <= next_r < rows and 0 <= next_c < cols
+                next2_valid = 0 <= next2_r < rows and 0 <= next2_c < cols
+                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
+                prev2_valid = 0 <= prev2_r < rows and 0 <= prev2_c < cols
+
+                if not (next_valid and next2_valid and prev_valid and prev2_valid):
+                    continue
+
+                # x-x pattern
+                if (board[next_r, next_c] == not_occupied and
+                        (next2_r, next2_c) in piece_set):
+                    prev_piece = board[prev_r, prev_c]
+                    next3_r, next3_c = next2_r + dr, next2_c + dc
+                    next3_valid = 0 <= next3_r < rows and 0 <= next3_c < cols
+                    next3_piece = board[next3_r, next3_c] if next3_valid else 0.75
+
+                    open_ends = 0
+                    if prev_piece == not_occupied:
+                        open_ends += 1
+                    if next3_piece == not_occupied:
+                        open_ends += 1
+
+                    if open_ends > 0:
+                        feature_key = (r, c, dr, dc, 'x-x')
+                        if feature_key not in counted_features:
+                            counted_features.add(feature_key)
+                            weight = open_ends / 2.0
+                            if verbose:
+                                pattern = f"x-x with {open_ends} open end(s)"
+                                print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
+                            count += weight
+
+        return count
+
+    @staticmethod
+    def get_connected_3_feature(board, player_pieces, not_occupied=.75, verbose=False):
+        '''Calculate connected 3-in-a-row features with open-end weighting
+        
+        Patterns:
+        - -xxx- : fully open (weight=1.0)
+        - oxxx- or -xxxo : semi-open (weight=0.5)
+        - oxxxo : closed (weight=0.0, not counted)
+        '''
+        if player_pieces is None or len(player_pieces) < 3:
+            return 0
+
+        rows, cols = board.shape
+        count = 0.0
+
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        direction_names = {(0, 1): 'horizontal',
+                           (1, 0): 'vertical',
+                           (1, 1): 'diagonal1',
+                           (1, -1): 'diagonal2'}
+
+        piece_set = set(map(tuple, player_pieces))
+        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
+        opponent_color = 1 - player_color
+
+        counted_features = set()
+
+        for r, c in player_pieces:
+            for dr, dc in directions:
+                next_r, next_c = r + dr, c + dc
+                next2_r, next2_c = next_r + dr, next_c + dc
+                next3_r, next3_c = next2_r + dr, next2_c + dc
+                prev_r, prev_c = r - dr, c - dc
+
+                # Check if we have three connected pieces
+                if not ((next_r, next_c) in piece_set and
+                        (next2_r, next2_c) in piece_set):
+                    continue
+
+                next3_valid = 0 <= next3_r < rows and 0 <= next3_c < cols
+                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
+
+                if not (next3_valid and prev_valid):
+                    continue
+
+                prev_piece = board[prev_r, prev_c]
+                next3_piece = board[next3_r, next3_c]
+
+                # Calculate open ends (not blocked by opponent)
+                open_ends = 0
+                if prev_piece == not_occupied:
+                    open_ends += 1
+                if next3_piece == not_occupied:
+                    open_ends += 1
+
+                # Only count if at least one end is open
+                if open_ends > 0:
+                    feature_key = (r, c, dr, dc)
+                    if feature_key not in counted_features:
+                        counted_features.add(feature_key)
+                        weight = open_ends / 2.0
+                        if verbose:
+                            pattern = f"xxx with {open_ends} open end(s)"
+                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
+                        count += weight
+
+        return count
+
+    @staticmethod
+    def get_connected_4_feature(board, player_pieces, not_occupied=.75, verbose=False):
+        '''Calculate connected 4-in-a-row features
+        
+        4-in-a-row is always a win, so we just count it once per direction.
+        '''
+        if player_pieces is None or len(player_pieces) < 4:
+            return 0
+
+        rows, cols = board.shape
+        count = 0
+
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        direction_names = {(0, 1): 'horizontal',
+                           (1, 0): 'vertical',
+                           (1, 1): 'diagonal1',
+                           (1, -1): 'diagonal2'}
+
+        piece_set = set(map(tuple, player_pieces))
+        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
+
+        counted_features = set()
+
+        for r, c in player_pieces:
+            for dr, dc in directions:
+                next_r, next_c = r + dr, c + dc
+                next2_r, next2_c = next_r + dr, next_c + dc
+                next3_r, next3_c = next2_r + dr, next2_c + dc
+                prev_r, prev_c = r - dr, c - dc
+
+                # Check if we have four connected pieces
+                if not ((next_r, next_c) in piece_set and
+                        (next2_r, next2_c) in piece_set and
+                        (next3_r, next3_c) in piece_set):
+                    continue
+
+                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
+
+                # Only count once per xxxx occurrence (at the start of the sequence)
+                if not prev_valid or board[prev_r, prev_c] != player_color:
+                    feature_key = (r, c, dr, dc)
+                    if feature_key not in counted_features:
+                        counted_features.add(feature_key)
+                        if verbose:
+                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: xxxx')
+                        count += 1
+
+        return count

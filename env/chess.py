@@ -29,7 +29,7 @@ class four_in_a_row:
         self.cell_size = 100
         self.rows = 4
         self.cols = 9
-        self.center = np.array([1.5, 4])
+        self.center = np.array([1.5, 4])  # index of the center cell
 
     # ------- game methods --------
     def get_valid_actions(self, board):
@@ -293,9 +293,3 @@ class four_in_a_row:
 
         plt.title(f"Player {self.curr_player + 1}'s turn", fontsize=16)
         plt.show()
-
-
-if __name__ == '__main__':
-    env = four_in_a_row()
-    state = env.reset()
-    env.render()
