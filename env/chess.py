@@ -7,6 +7,10 @@ from copy import deepcopy
 
 
 class four_in_a_row:
+    # class-level constants to support static helpers (e.g., action2idx)
+    rows = 4
+    cols = 9
+    not_occupied_val = 0.75
     """Four in a Row environment class"""
     def __init__(self):
         self.init_game()
@@ -23,12 +27,12 @@ class four_in_a_row:
         # Colors for players, there are two players
         self.player1_color = 0
         self.player2_color = 1
-        self.not_occupied = .75  # the available grid, meaning empty cell
+        self.not_occupied = self.not_occupied_val  # the available grid, meaning empty cell
 
         # Board rendering
         self.cell_size = 100
-        self.rows = 4
-        self.cols = 9
+        self.rows = self.__class__.rows
+        self.cols = self.__class__.cols
         self.center = np.array([1.5, 4])  # index of the center cell
 
     # ------- game methods --------
@@ -293,3 +297,99 @@ class four_in_a_row:
 
         plt.title(f"Player {self.curr_player + 1}'s turn", fontsize=16)
         plt.show()
+
+
+    # ---------------- for fitting ---------------- #
+    # read the human data, transform the state and action into indices
+    @staticmethod
+    def embed(design):
+        board_idx = design[0]
+        resolved_player = design[1]
+        board = four_in_a_row.idx2board(int(board_idx))
+        return (board, int(resolved_player))
+
+    @staticmethod
+    def get_design_response_mat(sub_data):
+        '''Get the design matrix of the state
+
+        Combine the 
+            * board: the board of the game
+            * curr_player: the current player
+            into a vector (1XK), and build a 
+            design matrix (NxK) for the block data.
+            N is the number of trials within the block.
+
+        Inputs:
+            sub_data (dict): the subject data
+                * key: block_id, value: block_data
+
+        Outputs:
+            design_matrix (np.ndarray): the design matrix
+            response_matrix (np.ndarray): the response matrix
+        '''
+        design_matrix = []
+        response_matrix = []
+        block_lst = sub_data.keys()
+        for block in block_lst:
+            block_data = sub_data[block]
+            for _, row in block_data.iterrows():
+                state_idx = row['state_idx']
+                # save the state idx 
+                design_matrix.append(state_idx)
+                # save the action idx 
+                action_idx = four_in_a_row.action2idx(eval(row['action']))
+                response_matrix.append(action_idx)
+        return np.array(design_matrix), np.array(response_matrix)
+
+    @staticmethod
+    def layout2board(layout):
+        return np.array([[four_in_a_row.not_occupied_val if c == '.' else 0 if c == '0' else 1. for c in row] for row in layout])
+
+    @staticmethod
+    def board2layout(board):
+        return [''.join(['.' if x==four_in_a_row.not_occupied_val else '0' if x==0 else '1' for x in row]) for row in board]
+
+    @staticmethod
+    def layout2idx(layout):
+        mapping = {'.': 0, '0': 1, '1': 2}
+        idx = 0
+        for ch in ''.join(layout):
+            idx = idx * 3 + mapping[ch]
+        return idx
+
+    @staticmethod
+    def board2idx(board):
+        return four_in_a_row.layout2idx(four_in_a_row.board2layout(board))
+
+    @staticmethod
+    def idx2layout(idx):
+        rows = four_in_a_row.rows
+        cols = four_in_a_row.cols
+        total = rows * cols
+        mapping = {0: '.', 1: '0', 2: '1'}
+        digits = []
+        value = int(idx)
+        for _ in range(total):
+            value, rem = divmod(value, 3)
+            digits.append(mapping[rem])
+        if value != 0:
+            import warnings
+            warnings.warn("idx2layout(): idx exceeds board size; truncating leading digits.")
+        flat = list(reversed(digits))
+        return [''.join(flat[r*cols:(r+1)*cols]) for r in range(rows)]
+
+    @staticmethod
+    def idx2board(idx):
+        layout = four_in_a_row.idx2layout(idx)
+        return four_in_a_row.layout2board(layout)
+
+    @staticmethod
+    def action2idx(action):
+        '''Convert the coordinates to an integer'''
+        x, y = action
+        return x*four_in_a_row.cols+y
+    
+    @staticmethod
+    def idx2action(idx):
+        '''Convert the integer to coordinates'''
+        return idx//four_in_a_row.cols, idx%four_in_a_row.cols

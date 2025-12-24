@@ -1,4 +1,5 @@
 /data
 .idea/
+.vscode/
 */__pycache__/
 *.json

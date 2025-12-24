@@ -21,22 +21,6 @@ pth = os.path.dirname(os.path.abspath(__file__))
 
 
 # -------------- Basic units -------------- #
-class queue:
-    def __init__(self):
-        self.elements = []
-
-    def is_empty(self):
-        return len(self.elements) == 0
-
-    def put(self, x):
-        self.elements.append(x)
-
-    def get(self):
-        if not self.is_empty():
-            return self.elements.pop(0)
-        return None
-
-
 class Node:
     def __init__(self, state, action=None, parent=None, depth=0,
                  value=None, heuristic_fn=None):
@@ -86,9 +70,9 @@ class default_params:
 
 
 class basic_agent:
-    def __init__(self, env, params):
+    def __init__(self, env):
         self.env = env
-        self.load_params(params)
+        self.load_params(default_params().to_list())
 
     def load_params(self, params: list):
         raise NotImplementedError
@@ -96,14 +80,22 @@ class basic_agent:
     def get_action(self, state: tuple):
         raise NotImplementedError
 
-    def response_generator(self, params: list, design: np.array):
-        self.load_params(params)
-        state_lst = [self.env.embed(d) for d in design]
-        action_lst = list(map(self.get_action, state_lst))
-        return np.array([self.env.action2idx(action) for action in action_lst])
-
     def heuristic(self, state: tuple):
         raise NotImplementedError
+    
+    
+    # ----------- For IBS parameter inference -------------- #
+    def response_generator(self, params: list, design: np.array):
+        """
+        Generate responses based on the given parameters and stimuli, using the supposed agent.
+        The supposed agent is 'real' agent, used to simulate data.
+        This function is used in parameter inference to check the IBS class.
+        """
+        self.load_params(params)  # true parameters, for simulation
+        # design can be an array of state indices or rows [board_idx, player_id]
+        state_lst = [self.env.embed(d) for d in design]
+        action_lst = list(map(self.get_action, state_lst))  # responses from the agent (true actions)
+        return np.array([self.env.action2idx(action) for action in action_lst])
 
 
 # ----------- Heuristic Agents -------------- #
@@ -122,8 +114,8 @@ class HeuristicAgent(basic_agent):
                (-5, 5), (-5, 5), (-5, 5), (-5, 5), (-5, 5)]  # prior bounds, used in parameter inference
     n_params = len(p_names)
 
-    def __init__(self, env, params):
-        super().__init__(env, params)
+    def __init__(self, env):
+        super().__init__(env)
         self.define_features()
 
     def load_params(self, params: list):
@@ -847,266 +839,3 @@ class BFSAgent(HeuristicAgent):
         # backpropagate the value to the parent node
         if node.parent is not None:
             self.backpropagate(node.parent)
-
-
-# ------------ Improved Heuristic Agent with Open-End Feature ------------ #
-class OpenEndHeuristicAgent(HeuristicAgent):
-    '''Improved Heuristic Agent with Open-End Features
-    
-    This agent refines the feature extraction by considering the number of open ends
-    for each pattern. A pattern is weighted based on how many sides are unblocked:
-    - Fully open (both ends empty): weight = 1.0
-    - Semi-open (one end blocked): weight = 0.5
-    - Closed (both ends blocked): weight = 0.0 (not counted)
-    '''
-    name = 'open_end_heuristic_agent'
-
-    @staticmethod
-    def get_connected_2_feature(board, player_pieces, not_occupied=.75, verbose=False):
-        '''Calculate connected 2-in-a-row features with open-end weighting
-        
-        Patterns:
-        - -xx- : fully open 2 (weight=1.0)
-        - oxx- or -xxo : semi-open 2 (weight=0.5)
-        - oxxo : closed 2 (weight=0.0, not counted)
-        
-        Check in four directions: horizontal, vertical, diagonal1, diagonal2.
-        '''
-        if player_pieces is None or len(player_pieces) < 2:
-            return 0
-
-        rows, cols = board.shape
-        count = 0.0
-
-        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-        direction_names = {(0, 1): 'horizontal',
-                           (1, 0): 'vertical',
-                           (1, 1): 'diagonal1',
-                           (1, -1): 'diagonal2'}
-
-        piece_set = set(map(tuple, player_pieces))
-        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
-        opponent_color = 1 - player_color
-
-        counted_features = set()
-
-        for r, c in player_pieces:
-            for dr, dc in directions:
-                next_r, next_c = r + dr, c + dc
-                if (next_r, next_c) not in piece_set:
-                    continue
-
-                prev_r, prev_c = r - dr, c - dc
-                next2_r, next2_c = next_r + dr, next_c + dc
-
-                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
-                next2_valid = 0 <= next2_r < rows and 0 <= next2_c < cols
-
-                if not (prev_valid and next2_valid):
-                    continue
-
-                prev_piece = board[prev_r, prev_c]
-                next2_piece = board[next2_r, next2_c]
-
-                # Calculate number of open ends (0, 1, or 2)
-                open_ends = 0
-                if prev_piece == not_occupied:
-                    open_ends += 1
-                if next2_piece == not_occupied:
-                    open_ends += 1
-
-                # Only count if at least one end is open
-                if open_ends > 0:
-                    feature_key = (r, c, dr, dc)
-                    if feature_key not in counted_features:
-                        counted_features.add(feature_key)
-                        weight = open_ends / 2.0  # Normalize: 1 open end = 0.5, 2 open ends = 1.0
-                        if verbose:
-                            pattern = f"xx with {open_ends} open end(s)"
-                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
-                        count += weight
-
-        return count
-
-    @staticmethod
-    def get_unconnected_2_feature(board, player_pieces, not_occupied=.75, verbose=False):
-        '''Calculate unconnected 2-in-a-row features with open-end weighting
-        
-        Patterns:
-        - -x-x- : fully open (weight=1.0)
-        - ox-x- or -x-xo : semi-open (weight=0.5)
-        - ox-xo : closed (weight=0.0, not counted)
-        '''
-        if player_pieces is None or len(player_pieces) < 2:
-            return 0
-
-        rows, cols = board.shape
-        count = 0.0
-
-        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-        direction_names = {(0, 1): 'horizontal',
-                           (1, 0): 'vertical',
-                           (1, 1): 'diagonal1',
-                           (1, -1): 'diagonal2'}
-
-        piece_set = set(map(tuple, player_pieces))
-
-        counted_features = set()
-
-        for r, c in player_pieces:
-            for dr, dc in directions:
-                next_r, next_c = r + dr, c + dc
-                next2_r, next2_c = next_r + dr, next_c + dc
-                prev_r, prev_c = r - dr, c - dc
-                prev2_r, prev2_c = prev_r - dr, prev_c - dc
-
-                next_valid = 0 <= next_r < rows and 0 <= next_c < cols
-                next2_valid = 0 <= next2_r < rows and 0 <= next2_c < cols
-                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
-                prev2_valid = 0 <= prev2_r < rows and 0 <= prev2_c < cols
-
-                if not (next_valid and next2_valid and prev_valid and prev2_valid):
-                    continue
-
-                # x-x pattern
-                if (board[next_r, next_c] == not_occupied and
-                        (next2_r, next2_c) in piece_set):
-                    prev_piece = board[prev_r, prev_c]
-                    next3_r, next3_c = next2_r + dr, next2_c + dc
-                    next3_valid = 0 <= next3_r < rows and 0 <= next3_c < cols
-                    next3_piece = board[next3_r, next3_c] if next3_valid else 0.75
-
-                    open_ends = 0
-                    if prev_piece == not_occupied:
-                        open_ends += 1
-                    if next3_piece == not_occupied:
-                        open_ends += 1
-
-                    if open_ends > 0:
-                        feature_key = (r, c, dr, dc, 'x-x')
-                        if feature_key not in counted_features:
-                            counted_features.add(feature_key)
-                            weight = open_ends / 2.0
-                            if verbose:
-                                pattern = f"x-x with {open_ends} open end(s)"
-                                print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
-                            count += weight
-
-        return count
-
-    @staticmethod
-    def get_connected_3_feature(board, player_pieces, not_occupied=.75, verbose=False):
-        '''Calculate connected 3-in-a-row features with open-end weighting
-        
-        Patterns:
-        - -xxx- : fully open (weight=1.0)
-        - oxxx- or -xxxo : semi-open (weight=0.5)
-        - oxxxo : closed (weight=0.0, not counted)
-        '''
-        if player_pieces is None or len(player_pieces) < 3:
-            return 0
-
-        rows, cols = board.shape
-        count = 0.0
-
-        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-        direction_names = {(0, 1): 'horizontal',
-                           (1, 0): 'vertical',
-                           (1, 1): 'diagonal1',
-                           (1, -1): 'diagonal2'}
-
-        piece_set = set(map(tuple, player_pieces))
-        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
-        opponent_color = 1 - player_color
-
-        counted_features = set()
-
-        for r, c in player_pieces:
-            for dr, dc in directions:
-                next_r, next_c = r + dr, c + dc
-                next2_r, next2_c = next_r + dr, next_c + dc
-                next3_r, next3_c = next2_r + dr, next2_c + dc
-                prev_r, prev_c = r - dr, c - dc
-
-                # Check if we have three connected pieces
-                if not ((next_r, next_c) in piece_set and
-                        (next2_r, next2_c) in piece_set):
-                    continue
-
-                next3_valid = 0 <= next3_r < rows and 0 <= next3_c < cols
-                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
-
-                if not (next3_valid and prev_valid):
-                    continue
-
-                prev_piece = board[prev_r, prev_c]
-                next3_piece = board[next3_r, next3_c]
-
-                # Calculate open ends (not blocked by opponent)
-                open_ends = 0
-                if prev_piece == not_occupied:
-                    open_ends += 1
-                if next3_piece == not_occupied:
-                    open_ends += 1
-
-                # Only count if at least one end is open
-                if open_ends > 0:
-                    feature_key = (r, c, dr, dc)
-                    if feature_key not in counted_features:
-                        counted_features.add(feature_key)
-                        weight = open_ends / 2.0
-                        if verbose:
-                            pattern = f"xxx with {open_ends} open end(s)"
-                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: {pattern}, weight: {weight}')
-                        count += weight
-
-        return count
-
-    @staticmethod
-    def get_connected_4_feature(board, player_pieces, not_occupied=.75, verbose=False):
-        '''Calculate connected 4-in-a-row features
-        
-        4-in-a-row is always a win, so we just count it once per direction.
-        '''
-        if player_pieces is None or len(player_pieces) < 4:
-            return 0
-
-        rows, cols = board.shape
-        count = 0
-
-        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-        direction_names = {(0, 1): 'horizontal',
-                           (1, 0): 'vertical',
-                           (1, 1): 'diagonal1',
-                           (1, -1): 'diagonal2'}
-
-        piece_set = set(map(tuple, player_pieces))
-        player_color = int(board[player_pieces[0][0], player_pieces[0][1]])
-
-        counted_features = set()
-
-        for r, c in player_pieces:
-            for dr, dc in directions:
-                next_r, next_c = r + dr, c + dc
-                next2_r, next2_c = next_r + dr, next_c + dc
-                next3_r, next3_c = next2_r + dr, next2_c + dc
-                prev_r, prev_c = r - dr, c - dc
-
-                # Check if we have four connected pieces
-                if not ((next_r, next_c) in piece_set and
-                        (next2_r, next2_c) in piece_set and
-                        (next3_r, next3_c) in piece_set):
-                    continue
-
-                prev_valid = 0 <= prev_r < rows and 0 <= prev_c < cols
-
-                # Only count once per xxxx occurrence (at the start of the sequence)
-                if not prev_valid or board[prev_r, prev_c] != player_color:
-                    feature_key = (r, c, dr, dc)
-                    if feature_key not in counted_features:
-                        counted_features.add(feature_key)
-                        if verbose:
-                            print(f'{r}, {c}: {direction_names[(dr, dc)]}, pattern: xxxx')
-                        count += 1
-
-        return count

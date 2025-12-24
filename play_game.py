@@ -95,7 +95,7 @@ def log_move(player_id, coord):
 def save_data(result):
     os.makedirs("data", exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"data/{selected_mode}_{timestamp}.json"
+    filename = os.path.join("data", f"{selected_mode}_{timestamp}.json")
     data = {
         "mode": selected_mode,
         "player1": player1_moves,
@@ -217,7 +217,7 @@ def draw_id_inputs(allow_edit):
         screen.blit(label2, (panel_rect.x + panel_width / 2 + 5, panel_rect.y + 8))
         agent_selector_rect = pygame.Rect(panel_rect.x + panel_width / 2 + 5, panel_rect.y + 30, input_width, 24)
         
-        # 选择器背景（锁定时变灰）
+        # 选择器背景（锁定时变浅灰）
         selector_fill = WHITE if allow_edit else DARK_GRAY
         pygame.draw.rect(screen, selector_fill, agent_selector_rect, border_radius=4)
         pygame.draw.rect(screen, DARK_GRAY, agent_selector_rect, 1, border_radius=4)
@@ -227,7 +227,7 @@ def draw_id_inputs(allow_edit):
         screen.blit(agent_text, (agent_selector_rect.x + 5, agent_selector_rect.y + 5))
         
         # 下拉箭头
-        arrow_text = font.render("▼" if not agent_dropdown_open else "▲", True, BLACK)
+        arrow_text = font.render("▼" if not agent_dropdown_open else "▲", True, BLACK)  
         screen.blit(arrow_text, (agent_selector_rect.right - 20, agent_selector_rect.y + 5))
         
         # 下拉菜单（向上展开以避免遮挡棋盘）
@@ -272,14 +272,11 @@ def reset_game(mode, agent_type=None):
         agent_type = selected_agent_type if mode == "PVE" else "random"
 
     if agent_type == "heuristic":
-        params = agent_module.default_params().to_list()
-        agent = agent_module.HeuristicAgent(game, params=params)
+        agent = agent_module.HeuristicAgent(game)
     elif agent_type == "bfs":
-        params = agent_module.default_params().to_list()
-        agent = agent_module.BFSAgent(game, params=params)
+        agent = agent_module.BFSAgent(game)
     elif agent_type == "open_end":
-        params = agent_module.default_params().to_list()
-        agent = agent_module.OpenEndHeuristicAgent(game, params=params)
+        agent = agent_module.OpenEndHeuristicAgent(game)
     elif agent_type == "random":
         agent = agent_module.RandomAgent(game, player_id=1)
     else:  # error
@@ -288,17 +285,36 @@ def reset_game(mode, agent_type=None):
 
     state = game.reset()
     game_data = {c: [] for c in ['board', 'play_to_move', 'action', 'done', 'winner', 'trial', 'time_elapsed', 'rt', 'player1_id', 'player2_id']}
+
+    def make_block(pid):
+        return {
+            'player_id': pid,
+            'trial': [],
+            'board': [],
+            'board_idx': [],
+            'action': [],
+            'action_idx': [],
+            'time_elapsed': [],
+            'rt': [],
+            'env_player_id': []
+        }
+
+    block_data = {
+        'player1': make_block(player1_id),
+        'player2': make_block(player2_id if mode == "PVP" else ai_label)
+    }
+
     block_start_time = time.perf_counter()
     state_present_time = block_start_time
     trial = 0
-    return game, agent, state, False, None, game_data, block_start_time, state_present_time, trial
+    return game, agent, state, False, None, game_data, block_data, block_start_time, state_present_time, trial
 
 
 def main():
     global selected_mode, player1_id, player2_id, ai_label, input_text1, input_text2, active_input1, active_input2, ids_confirmed, moves_started, selected_agent_type, agent_dropdown_open
     ai_label = selected_agent_type
     clock = pygame.time.Clock()
-    game, agent, state, game_over, winner_text, game_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
+    game, agent, state, game_over, winner_text, game_data, block_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
     moves_started = False
 
     while True:
@@ -345,6 +361,16 @@ def main():
                 game_data['rt'].append(rt)
                 game_data['player1_id'].append(player1_id)
                 game_data['player2_id'].append(ai_label)
+
+                board_layout_str = ''.join(board2layout(board_before))
+                block_data['player2']['trial'].append(trial)
+                block_data['player2']['board'].append(board_layout_str)
+                block_data['player2']['board_idx'].append(four_in_a_row.board2idx(board_before))
+                block_data['player2']['action'].append(str(action))
+                block_data['player2']['action_idx'].append(four_in_a_row.action2idx(action))
+                block_data['player2']['time_elapsed'].append(elapsed_seconds)
+                block_data['player2']['rt'].append(rt)
+                block_data['player2']['env_player_id'].append(player_to_move)
                 state_present_time = response_time
                 trial += 1
 
@@ -353,11 +379,15 @@ def main():
                     winner = info.get("winner", "draw").lower()
                     result = "player1" if winner == "black" else "player2" if winner == "white" else "draw"
                     winner_text = "Player 1 wins!" if winner == "black" else "Player 2 wins!" if winner == "white" else "It's a draw!"
-                    # save CSV in original-like format
-                    mode_dir = os.path.join("data", "pve")
+                    mode_lower = selected_mode.lower()
+                    mode_dir = os.path.join("data", mode_lower)
                     os.makedirs(mode_dir, exist_ok=True)
-                    fname = os.path.join(mode_dir, f"pve-block={block_ids['PVE']}.csv")
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    fname = os.path.join(mode_dir, f"{mode_lower}-{timestamp}.csv")
                     pd.DataFrame(game_data).to_csv(fname, index=False)
+                    block_fname = os.path.join(mode_dir, f"{mode_lower}-blocks-{timestamp}.json")
+                    with open(block_fname, "w") as f:
+                        json.dump({"mode": selected_mode, "player1": block_data['player1'], "player2": block_data['player2']}, f, indent=2)
                     block_ids['PVE'] += 1
 
         draw_board(game, winner_text if game_over else None)
@@ -406,7 +436,7 @@ def main():
                                 moves_started = False
                                 ids_confirmed = False
                                 # Reset game with new agent
-                                game, agent, state, game_over, winner_text, game_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
+                                game, agent, state, game_over, winner_text, game_data, block_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
                                 break
                         if clicked_item:
                             continue
@@ -429,6 +459,8 @@ def main():
                     else:  # PVE keeps AI label fixed
                         player1_id = input_text1.strip() or player1_id
                         player2_id = ai_label
+                    block_data['player1']['player_id'] = player1_id
+                    block_data['player2']['player_id'] = player2_id
                     ids_confirmed = True
                     active_input1 = active_input2 = False
                     continue
@@ -438,7 +470,7 @@ def main():
                     ids_confirmed = False
                     moves_started = False
                     input_text1, input_text2 = "", ""
-                    game, agent, state, game_over, winner_text, game_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type="random")
+                    game, agent, state, game_over, winner_text, game_data, block_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type="random")
                     continue
 
                 if pve_btn.collidepoint(pos):
@@ -447,7 +479,7 @@ def main():
                     ids_confirmed = False
                     moves_started = False
                     input_text1, input_text2 = "", ""
-                    game, agent, state, game_over, winner_text, game_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
+                    game, agent, state, game_over, winner_text, game_data, block_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=selected_agent_type)
                     continue
 
                 if restart_btn.collidepoint(pos):
@@ -457,7 +489,7 @@ def main():
                     ids_confirmed = False
                     moves_started = False
                     input_text1, input_text2 = "", ""
-                    game, agent, state, game_over, winner_text, game_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=agent_type)
+                    game, agent, state, game_over, winner_text, game_data, block_data, block_start_time, state_present_time, trial = reset_game(selected_mode, agent_type=agent_type)
                     continue
 
                 if exit_btn.collidepoint(pos):
@@ -481,6 +513,8 @@ def main():
                     else:
                         player1_id = input_text1.strip() or player1_id
                         player2_id = ai_label
+                    block_data['player1']['player_id'] = player1_id
+                    block_data['player2']['player_id'] = player2_id
                     ids_confirmed = True
 
                 board_before = game.board.copy()
@@ -507,6 +541,17 @@ def main():
                 game_data['rt'].append(rt)
                 game_data['player1_id'].append(player1_id)
                 game_data['player2_id'].append(player2_id if selected_mode == "PVP" else ai_label)
+
+                board_layout_str = ''.join(board2layout(board_before))
+                actor_key = 'player1' if player == 'player1' else 'player2'
+                block_data[actor_key]['trial'].append(trial)
+                block_data[actor_key]['board'].append(board_layout_str)
+                block_data[actor_key]['board_idx'].append(four_in_a_row.board2idx(board_before))
+                block_data[actor_key]['action'].append(str((row, col)))
+                block_data[actor_key]['action_idx'].append(four_in_a_row.action2idx((row, col)))
+                block_data[actor_key]['time_elapsed'].append(elapsed_seconds)
+                block_data[actor_key]['rt'].append(rt)
+                block_data[actor_key]['env_player_id'].append(player_to_move)
                 state_present_time = response_time
                 trial += 1
 
@@ -514,10 +559,15 @@ def main():
                     game_over = True
                     winner = info.get("winner", "draw").lower()
                     winner_text = "Player 1 wins!" if winner == "black" else "Player 2 wins!" if winner == "white" else "It's a draw!"
-                    mode_dir = os.path.join("data", "pvp")
+                    mode_lower = selected_mode.lower()
+                    mode_dir = os.path.join("data", mode_lower)
                     os.makedirs(mode_dir, exist_ok=True)
-                    fname = os.path.join(mode_dir, f"pvp-block={block_ids['PVP']}.csv")
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    fname = os.path.join(mode_dir, f"{mode_lower}-{timestamp}.csv")
                     pd.DataFrame(game_data).to_csv(fname, index=False)
+                    block_fname = os.path.join(mode_dir, f"{mode_lower}-blocks-{timestamp}.json")
+                    with open(block_fname, "w") as f:
+                        json.dump({"mode": selected_mode, "player1": block_data['player1'], "player2": block_data['player2']}, f, indent=2)
                     block_ids['PVP'] += 1
 
 
