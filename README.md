@@ -1,95 +1,98 @@
 # Four in a Row (4x9)
 
-Four in a Row (4x9) with Pygame UI and several agents (player vs player, player vs AI). 本项目受
-Van Opheusden et al. (2023) "Expertise increases planning depth in human gameplay" 启发。
+Four in a Row (4x9) with Pygame UI and several agents (player vs player, player vs AI). Inspired by
+Van Opheusden et al. (2023) "Expertise increases planning depth in human gameplay".
 
-## 项目核心
+## Project Overview
 
-本项目包含两个主要部分：
+This project consists of two main components:
 
-1. **四子棋游戏与行为数据采集**：实现了一个完整的四子棋游戏，支持人机对弈（PVE）、双人对弈（PVP）等多种模式。游戏可以实时采集玩家行为数据，包括每步落子位置与落子时间等信息。
+1. **Game & Behavioral Data Collection**: A complete Four-in-a-Row game implementation supporting multiple modes including Player vs AI (PVE) and Player vs Player (PVP). The game collects real-time behavioral data, including the position of each move and the time taken to make it.
 
-2. **智能算法与假设行为模型**：游戏中的智能算法（AI Agent）实现在 `env/agent.py` 中。关键的一点是，这个 Agent 同时也被用作**人类行为的假设模型**。
-   
-   具体地说，实际应用中我们只有人类玩家的行为数据，希望用一个假设模型来拟合这些数据。为了评估参数拟合算法的优劣，我们采用了一个巧妙的验证方法：
-   - **给定一个"正确的"假设模型**（即我们的 Agent 实现），用其生成合成数据
-   - **然后用参数拟合算法去重新拟合这个合成数据**，恢复出原始的模型参数
-   - 通过对比恢复的参数与真实参数，评估拟合算法的准确性与可靠性
+2. **Intelligent Algorithm & Behavioral Hypothesis Model**: The game's AI algorithm (Agent) is implemented in `env/agent.py`. Crucially, this Agent also serves as a **hypothesis model for human behavior**.
 
-## 功能概览
-- 4x9 棋盘，四子连线胜出（横、竖、两条对角线）。
-- 模式：PVP（双人）、PVE（玩家对 AI）。
-- AI 选项：随机 `RandomAgent`、启发式 `HeuristicAgent`、带前向搜索的 `BFSAgent`。
-- 界面：Pygame 绘制棋盘、按钮，支持重开与退出。
-- 数据记录：每步坐标与落子时间实时记录到 `data/<mode>/`，支持 CSV 和 JSON 两种格式。
+   In practical applications, we only have human player behavioral data and wish to fit a hypothesis model to it. To evaluate the quality of parameter fitting algorithms, we employ a clever validation approach:
+   - **Define a "ground truth" hypothesis model** (our Agent implementation) and use it to generate synthetic data.
+   - **Apply parameter fitting algorithms to recover the original model parameters** from the synthetic data.
+   - **Compare recovered parameters with true parameters** to assess the accuracy and reliability of the fitting algorithm.
 
-## 运行要求
-- Python 3.8+（本地测试使用 Anaconda 环境）。
-- 依赖：`pygame`, `numpy`, `matplotlib`（仅用于 `render()` 调试）。
+## Features
+- 4×9 board, connect four to win (horizontally, vertically, or diagonally).
+- Game modes: PVP (two players), PVE (player vs AI).
+- AI options: `RandomAgent` (random moves), `HeuristicAgent` (heuristic-based), `BFSAgent` (with forward search and pruning).
+- Interface: Pygame-based board rendering with buttons for mode switching, restart, and exit.
+- Data logging: Real-time recording of moves and timestamps to `data/<mode>/` in both CSV and JSON formats.
 
-快速安装（推荐在虚拟环境中）：
+## Requirements
+- Python 3.8+ (tested with Anaconda environment).
+- Dependencies: `pygame`, `numpy`, `matplotlib` (matplotlib only for `render()` debugging).
+
+Quick installation (recommended in a virtual environment):
 ```bash
 pip install pygame numpy matplotlib
 ```
 
-## 快速开始
+## Quick Start
 ```bash
 python play_game.py
 ```
-- 顶部按钮切换 PVP / PVE。
-- 底部按钮：Restart 重开；Exit 退出。
-- PVE 下，玩家先手（黑子，player1），AI 后手（白子，player2）。
-- 每步点击棋盘落子；越界或已占用格子无效。
-- 游戏结束后会在中央显示结果，并自动保存数据：
-  - **CSV 文件** `data/<mode>/<mode>_<timestamp>.csv`：包含完整的 game_data，列包括 board、play_to_move、action、done、winner、trial、time_elapsed、rt 等。
-  - **JSON 文件** `data/<mode>/<mode>-blocks-<timestamp>.json`：按玩家分组的 block 格式数据，用于参数拟合。
+- Click top buttons to toggle between PVP and PVE modes.
+- Bottom buttons: Restart (resets current game), Exit (closes application).
+- In PVE mode: player moves first (black pieces, player1), AI moves second (white pieces, player2).
+- Click on board cells to place a piece; invalid moves (out of bounds or occupied cells) are rejected.
+- When the game ends, the result is displayed in the center, and data is automatically saved:
+  - **CSV file** `data/<mode>/<mode>_<timestamp>.csv`: Contains complete game_data with columns including board, play_to_move, action, done, winner, trial, time_elapsed, rt, etc.
+  - **JSON file** `data/<mode>/<mode>-blocks-<timestamp>.json`: Block-format data grouped by player, used for parameter fitting.
 
-## 代码结构
-- `play_game.py`：Pygame UI 主循环，模式切换、事件处理（鼠标）、日志保存。
-	- `reset_game(mode, agent_type)`: 初始化环境、选择 agent（random / heuristic / bfs），并重置计时与日志。
-	- `main()`: 绘制 UI、响应点击、在 PVE 中驱动 AI 落子，游戏结束时保存 CSV 和 block-JSON 数据。
-- `env/chess.py`：环境与规则。
-	- 棋盘：4x9，空位值 0.75，先手黑 0，后手白 1。
-	- 规则：合法动作枚举 `get_valid_actions`，胜负/和判定 `check_win`/`check_draw`，一步转移 `transit`，高层接口 `step`，可视化 `render`。
-- `env/agent.py`：智能体与假设行为模型实现。
-	- `RandomAgent`: 纯随机合法落子。
-	- `HeuristicAgent`: 计算 5 个特征（中心、连2、非连2、连3、连4），使用 `minmax` 在根结点选择贪心动作；支持特征权重与到手方系数 `C`。同时也被用作人类行为的基础假设模型。
-	- `BFSAgent`: 继承启发式评分，加入前向搜索与剪枝。
-		- `plan()`: 可随机失误 (`lmbda`)，循环选择/扩展/回溯，按 `gamma` 或动作稳定性终止。
-		- `drop_feature(delta)`: 随机丢弃特征；`theta` 控制剪枝宽度；`C` 控制到手方/非到手方权重。
-		- 参数可用于拟合人类玩家的决策行为。
-- `fitting.ipynb`：交互式参数拟合笔记本，实现完整的拟合管道。
-	- 第 1 单元：数据加载与预处理，从 `data/<mode>/` 的 block-json 文件中提取对局序列。
-	- 第 2 单元：参数优化，使用 BADS 和 IBS 最小化 NLL，恢复 Agent 参数。
-	- 第 3 单元：结果分析与可视化，对比拟合参数与真实参数的误差。
-- `data/`: 对局日志目录，运行生成。
+## Code Structure
+- `play_game.py`: Pygame UI main loop handling mode switching, mouse events, and data logging.
+  - `reset_game(mode, agent_type)`: Initializes the environment, selects an agent (random / heuristic / bfs), and resets timing and logging.
+  - `main()`: Renders UI, handles user input, drives AI moves in PVE mode, and saves CSV and block-JSON data when game ends.
+- `env/chess.py`: Game environment and rules.
+  - Board: 4×9, empty cells = 0.75, player1 (black) = 0, player2 (white) = 1.
+  - Rules: legal action enumeration via `get_valid_actions`, win/draw checking via `check_win`/`check_draw`, single-step transition via `transit`, high-level interface `step`, visualization via `render`.
+- `env/agent.py`: Agent implementations and behavioral hypothesis models.
+  - `RandomAgent`: Selects random legal moves.
+  - `HeuristicAgent`: Computes 5 features (center, connected-2, unconnected-2, connected-3, connected-4) and uses `minmax` for greedy action selection at the root; supports feature weights and own-vs-opponent coefficient `C`. Also serves as the base hypothesis model for human behavior.
+  - `BFSAgent`: Extends heuristic scoring with forward search and pruning.
+    - `plan()`: Can make random errors (controlled by `lmbda`), iteratively selects/expands/backtracks, terminates based on `gamma` or action stability.
+    - `drop_feature(delta)`: Randomly drops features; `theta` controls pruning width; `C` controls own-vs-opponent weight balance.
+    - Parameters can be fitted to model human player decision-making.
+- `fitting.ipynb`: Interactive parameter fitting notebook implementing the complete fitting pipeline.
+  - Cell 1: Data loading and preprocessing from block-json files in `data/<mode>/`.
+  - Cell 2: Parameter optimization using BADS and IBS to minimize NLL and recover Agent parameters.
+  - Cell 3: Results analysis and visualization, comparing fitted parameters with ground truth.
+- `data/`: Game log directory, auto-generated when games are played.
 
-## AI 参数（默认值见 `default_params`）
-- `lmbda`：失误概率；`gamma`：停止搜索概率；`theta`：剪枝阈值；`delta`：特征丢弃率；`C`：到手方与非到手方的特征权重比。
-- 权重：`w_ce`（中心）、`w_c2`（连2）、`w_u2`（非连2）、`w_c3`（连3）、`w_c4`（连4）。
+## AI Parameters (default values in `default_params`)
+- `lmbda`: Error probability; `gamma`: Search termination probability; `theta`: Pruning threshold; `delta`: Feature dropout rate; `C`: Feature weight ratio for own vs. opponent.
+- Weights: `w_ce` (center), `w_c2` (connected-2), `w_u2` (unconnected-2), `w_c3` (connected-3), `w_c4` (connected-4).
 
-### 参数拟合（拟合管道实现在 `fitting.ipynb`）
-- **目标**：基于对局数据，通过最小化负对数似然（Negative Log-Likelihood, NLL）来恢复 Agent 的参数 $\Theta = [\lambda, \gamma, \theta, \delta, C, w_{ce}, w_{c2}, w_{u2}, w_{c3}, w_{c4}]$，验证拟合算法的有效性。
+### Parameter Fitting (Implemented in `fitting.ipynb`)
+- **Goal**: Recover Agent parameters $\Theta = [\lambda, \gamma, \theta, \delta, C, w_{ce}, w_{c2}, w_{u2}, w_{c3}, w_{c4}]$ from game data by minimizing Negative Log-Likelihood (NLL), and validate fitting algorithm effectiveness.
 
-- **数据准备**：
-	1) 从 `data/<mode>/` 中选择 block-json 文件（含有对局的落子序列与时间信息）。
-	2) 提取观测数据（design）：棋盘状态 `board_idx` 和玩家标识 `player_id` 的组合 $(\text{board\_idx}, \text{player\_id})$。
-	3) 提取响应数据（response）：对应的落子动作 `action_idx`。
+- **Data Preparation**:
+  1) Select a block-json file from `data/<mode>/` containing the move sequence and timing information.
+  2) Extract observed data (design): Combination of board state `board_idx` and player identifier `player_id` as $(\text{board\_idx}, \text{player\_id})$.
+  3) Extract response data (response): Corresponding move actions `action_idx`.
 
-- **拟合过程**：
-	1) **目标函数**：使用 IBS（Importance-Weighted Bayesian Sampling）方法构造似然函数，计算 Agent 的 `response_generator` 在给定参数下生成观测动作的似然。
-	2) **优化器**：采用 BADS（Bayesian Adaptive Direct Search）进行高效的贝叶斯优化，搜索参数空间中最小化 NLL 的解。
-	3) **约束**：参数受到硬边界 `p_bnds` 和偏好边界 `p_pbnds` 的限制，确保拟合结果在合理的搜索范围内。
+- **Fitting Process**:
+  1) **Objective Function**: Use IBS (Importance-Weighted Bayesian Sampling) to construct likelihood; compute likelihood of Agent's `response_generator` producing observed actions given parameters.
+  2) **Optimizer**: Employ BADS (Bayesian Adaptive Direct Search) for efficient Bayesian optimization to minimize NLL.
+  3) **Constraints**: Parameters bounded by hard bounds `p_bnds` and plausible bounds `p_pbnds` to ensure reasonable fitting results.
 
-- **评估**：
-	1) 对比拟合得到的参数与真实参数（`default_params`），计算每个参数的误差 $\Delta = \hat{\Theta} - \Theta_{\text{true}}$。
-	2) 追踪优化过程中 NLL 的演变与参数轨迹，评估收敛性与稳定性。
-	3) 通过多次不同初始点的优化运行，评估参数恢复的鲁棒性。
+- **Evaluation**:
+  1) Compare fitted parameters against ground truth (`default_params`); compute error $\Delta = \hat{\Theta} - \Theta_{\text{true}}$ for each parameter.
+  2) Track NLL evolution and parameter trajectories during optimization to assess convergence and stability.
+  3) Run optimization from multiple initializations to evaluate robustness of parameter recovery.
 
-## 调试与扩展
-- 调试 UI：如需更快 AI 响应可降低 `pygame.time.wait(300)`。
-- 更换 AI：`reset_game` 的 `agent_type` 允许 `random` / `heuristic` / `bfs`。
-- 录制数据：
-  - 查看 `data/<mode>/*.csv` 获取详细的逐步行为数据（board、action、time_elapsed、rt 等）。
-  - 查看 `data/<mode>/*-blocks-*.json` 获取按玩家分组的精简数据，用于 `fitting.ipynb` 中的参数拟合。
+## Debugging & Extensions
+- UI debugging: To speed up AI responses, reduce the value of `pygame.time.wait(300)`.
+- Switching AI: The `agent_type` parameter in `reset_game` accepts `random`, `heuristic`, or `bfs`.
+- Data inspection:
+  - View `data/<mode>/*.csv` for detailed step-by-step behavioral data (board, action, time_elapsed, rt, etc.).
+  - View `data/<mode>/*-blocks-*.json` for player-grouped compact data used in `fitting.ipynb` parameter fitting.
+
+## Known Settings
+- Fixed board size: 4 rows × 9 columns. Player1 (black) moves first, Player2 (white) moves second. Empty cells marked as `0.75`.
 
