@@ -73,7 +73,7 @@ python play_game.py
 
 - **Data Preparation**:
   1) Select a block-json file from `data/<mode>/` containing the move sequence and timing information.
-  2) Extract observed data (design): Combination of board state `board_idx` and player identifier `player_id` as $(\text{board\_idx}, \text{player\_id})$.
+  2) Extract observed data (design): Combination of board state `board_idx` and player identifier `player_id`.
   3) Extract response data (response): Corresponding move actions `action_idx`.
 
 - **Fitting Process**:
