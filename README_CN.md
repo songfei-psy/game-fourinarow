@@ -25,11 +25,18 @@ Van Opheusden et al. (2023) "Expertise increases planning depth in human gamepla
 
 ## 运行要求
 - Python 3.8+（本地测试使用 Anaconda 环境）。
-- 依赖：`pygame`, `numpy`, `matplotlib`（仅用于 `render()` 调试）。
+- 游戏依赖：`pygame`, `numpy`, `matplotlib`（仅用于 `render()` 调试）。
+- 参数拟合依赖：`pandas`, `scipy`, `pybads`（用于 `fitting.ipynb` 中的参数优化）。
+  - IBS (Inverse Binomial Sampling): https://github.com/acerbilab/ibs
+  - PyBADS: https://github.com/acerbilab/pybads
 
 快速安装（推荐在虚拟环境中）：
 ```bash
+# 游戏运行基础依赖
 pip install pygame numpy matplotlib
+
+# 参数拟合额外依赖
+pip install pandas scipy pybads
 ```
 
 ## 快速开始
@@ -77,7 +84,7 @@ python play_game.py
 	3) 提取响应数据（response）：对应的落子动作 `action_idx`。
 
 - **拟合过程**：
-	1) **目标函数**：使用 IBS（Importance-Weighted Bayesian Sampling）方法构造似然函数，计算 Agent 的 `response_generator` 在给定参数下生成观测动作的似然。
+	1) **目标函数**：使用 IBS（Inverse Binomial Sampling，逆二项采样）方法构造似然函数，计算 Agent 的 `response_generator` 在给定参数下生成观测动作的似然。
 	2) **优化器**：采用 BADS（Bayesian Adaptive Direct Search）进行高效的贝叶斯优化，搜索参数空间中最小化 NLL 的解。
 	3) **约束**：参数受到硬边界 `p_bnds` 和偏好边界 `p_pbnds` 的限制，确保拟合结果在合理的搜索范围内。
 
@@ -92,6 +99,3 @@ python play_game.py
 - 录制数据：
   - 查看 `data/<mode>/*.csv` 获取详细的逐步行为数据（board、action、time_elapsed、rt 等）。
   - 查看 `data/<mode>/*-blocks-*.json` 获取按玩家分组的精简数据，用于 `fitting.ipynb` 中的参数拟合。
-
-## 已知设定
-- 棋盘尺寸固定为 4 行 9 列，先手黑子（player1），后手白子（player2），空位标记为 `0.75`。

@@ -25,11 +25,18 @@ This project consists of two main components:
 
 ## Requirements
 - Python 3.8+ (tested with Anaconda environment).
-- Dependencies: `pygame`, `numpy`, `matplotlib` (matplotlib only for `render()` debugging).
+- Game dependencies: `pygame`, `numpy`, `matplotlib` (matplotlib only for `render()` debugging).
+- Parameter fitting dependencies: `pandas`, `scipy`, `pybads` (for parameter optimization in `fitting.ipynb`).
+  - IBS (Inverse Binomial Sampling): https://github.com/acerbilab/ibs
+  - PyBADS: https://github.com/acerbilab/pybads
 
 Quick installation (recommended in a virtual environment):
 ```bash
+# Basic dependencies for game
 pip install pygame numpy matplotlib
+
+# Additional dependencies for parameter fitting
+pip install pandas scipy pybads
 ```
 
 ## Quick Start
@@ -77,7 +84,7 @@ python play_game.py
   3) Extract response data (response): Corresponding move actions `action_idx`.
 
 - **Fitting Process**:
-  1) **Objective Function**: Use IBS (Importance-Weighted Bayesian Sampling) to construct likelihood; compute likelihood of Agent's `response_generator` producing observed actions given parameters.
+  1) **Objective Function**: Use IBS (Inverse Binomial Sampling) to construct likelihood; compute likelihood of Agent's `response_generator` producing observed actions given parameters.
   2) **Optimizer**: Employ BADS (Bayesian Adaptive Direct Search) for efficient Bayesian optimization to minimize NLL.
   3) **Constraints**: Parameters bounded by hard bounds `p_bnds` and plausible bounds `p_pbnds` to ensure reasonable fitting results.
 
@@ -92,7 +99,4 @@ python play_game.py
 - Data inspection:
   - View `data/<mode>/*.csv` for detailed step-by-step behavioral data (board, action, time_elapsed, rt, etc.).
   - View `data/<mode>/*-blocks-*.json` for player-grouped compact data used in `fitting.ipynb` parameter fitting.
-
-## Known Settings
-- Fixed board size: 4 rows × 9 columns. Player1 (black) moves first, Player2 (white) moves second. Empty cells marked as `0.75`.
 
